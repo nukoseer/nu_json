@@ -17,11 +17,13 @@ typedef struct NUJElement NUJElement;
 NUJDEF NUJHandle          nuj_init(void* memory, unsigned long long size);
 NUJDEF unsigned long long nuj_get_used_size(const NUJHandle handle);
 NUJDEF NUJElement*        nuj_create_element(NUJHandle handle, unsigned int type, unsigned int size);
-NUJDEF NUJElement*        nuj_create_element_object(NUJHandle handle, unsigned int element_count);
-NUJDEF NUJElement*        nuj_create_element_array(NUJHandle handle, unsigned int element_count);
 NUJDEF NUJElement*        nuj_create_element_string(NUJHandle handle, const char* string);
 NUJDEF NUJElement*        nuj_create_element_integer(NUJHandle handle, long long value);
 NUJDEF NUJElement*        nuj_create_element_double(NUJHandle handle, double value);
+NUJDEF NUJElement*        nuj_create_element_boolean(NUJHandle handle, int value);
+NUJDEF NUJElement*        nuj_create_element_null(NUJHandle handle);
+NUJDEF NUJElement*        nuj_create_element_object(NUJHandle handle, unsigned int element_count);
+NUJDEF NUJElement*        nuj_create_element_array(NUJHandle handle, unsigned int element_count);
 NUJDEF NUJElement*        nuj_add_element_element(NUJElement* element, const char* name, NUJElement* child);
 NUJDEF int                nuj_is_last_object_element(const NUJElement* element);
 NUJDEF void               nuj_printf(const NUJElement* element);
@@ -33,22 +35,26 @@ NUJDEF NUJElement*        nuj_parse(NUJHandle handle, const unsigned char* buffe
 
 #define NUJ_ASSERT(x) do { if (!(x)) { *(volatile int*)0; } } while (0)
 
+#define NUJ_STRING(x)     ((NUJString*)(x))
 #define NUJ_INTEGER(x)    ((NUJInteger*)(x))
 #define NUJ_DOUBLE(x)     ((NUJDouble*)(x))
-#define NUJ_STRING(x)     ((NUJString*)(x))
+#define NUJ_BOOLEAN(x)    ((NUJBoolean*)(x))
+#define NUJ_NULL(x)       ((NUJNull*)(x))
 #define NUJ_OBJECT(x)     ((NUJObject*)(x))
 #define NUJ_ARRAY(x)      ((NUJArray*)(x))
 
+#define NUJ_CSTRING(x)    ((const NUJString*)(x))
 #define NUJ_CINTEGER(x)   ((const NUJInteger*)(x))
 #define NUJ_CDOUBLE(x)    ((const NUJDouble*)(x))
-#define NUJ_CSTRING(x)    ((const NUJString*)(x))
+#define NUJ_CBOOLEAN(x)   ((const NUJBoolean*)(x))
+#define NUJ_CNULL(x)      ((const NUJNull*)(x))
 #define NUJ_COBJECT(x)    ((const NUJObject*)(x))
 #define NUJ_CARRAY(x)     ((const NUJArray*)(x))
 
 #define NUJ_CREATE_ELEMENT(handle, element)      (element*)(nuj_create_element(handle, element##_##TYPE, sizeof(element)))
-#define NUJ_GET_ELEMENT_VALUE(element, t)        (*((t*)(&NUJ_INTEGER(element)->value)))
-#define NUJ_GET_ELEMENT_CHILD(element, i)        (NUJ_OBJECT(element)->children[(i)])
-#define NUJ_GET_ELEMENT_CHILD_COUNT(element)     (NUJ_OBJECT(element)->child_count)
+#define NUJ_VALUE(element, t)                    (*((t*)(&NUJ_INTEGER(element)->value)))
+#define NUJ_CHILD(element, i)                    (NUJ_OBJECT(element)->children[(i)])
+#define NUJ_CHILD_COUNT(element)                 (NUJ_OBJECT(element)->child_count)
 
 typedef struct NUJParser  NUJParser;
 typedef struct NUJToken   NUJToken;
@@ -64,10 +70,10 @@ static void               nuj__parse_error(NUJParser* parser, NUJToken token, ch
 static inline int         nuj__parse_is_whitespace_char(char character);
 static inline void        nuj__parse_skip_all_whitespace_chars(NUJParser* parser);
 static inline int         nuj__parse_is_numeric(char character);
-static inline void        nuj__parse_skip_all_numerics(NUJParser* parser);
+static inline int         nuj__parse_skip_all_numerics(NUJParser* parser);
 static NUJToken           nuj__parse_get_token(NUJParser* parser);
 static inline int         nuj__parse_match_token(NUJToken token, unsigned int match_token_type);
-static double             nuj__parse_token_to_double(NUJToken token);
+static double             nuj__parse_token_to_number(NUJToken token, int is_double);
 static NUJElement*        nuj__parse_token_to_element(NUJHandle handle, NUJToken token);
 static NUJElement*        nuj__parse_element_pair_value(NUJHandle handle, NUJParser* parser);
 static inline void        nuj__parse_set_element_pair_name(NUJHandle handle, NUJElement* element, NUJToken token);
@@ -87,11 +93,13 @@ typedef struct NUJHandle
 
 enum NUJElementType
 {
-    NUJNull_TYPE,
+    NUJNone_TYPE,
 
     NUJString_TYPE,
     NUJInteger_TYPE,
     NUJDouble_TYPE,
+    NUJBoolean_TYPE,
+    NUJNull_TYPE,
     NUJArray_TYPE,
     NUJObject_TYPE,
 
@@ -125,6 +133,12 @@ typedef struct NUJDouble
     double value;
 } NUJDouble;
 
+typedef struct NUJBoolean
+{
+    struct NUJElement element;
+    long long value;
+} NUJBoolean, NUJNull;
+
 typedef struct NUJString
 {
     struct NUJElement element;
@@ -152,6 +166,9 @@ typedef enum NUJTokenType
 
     NUJ_STRING_TYPE,
     NUJ_NUMBER_TYPE,
+    NUJ_DOUBLE_TYPE,
+    NUJ_BOOLEAN_TYPE,
+    NUJ_NULL_TYPE,
 
     NUJ_EOF_TYPE,
 } NUJTokenType;
@@ -193,6 +210,16 @@ static unsigned int nuj__get_element_size(const NUJElement* element)
         case NUJDouble_TYPE:
         {
             size = sizeof(NUJDouble);
+        }
+        break;
+        case NUJBoolean_TYPE:
+        {
+            size = sizeof(NUJBoolean);
+        }
+        break;
+        case NUJNull_TYPE:
+        {
+            size = sizeof(NUJNull);
         }
         break;
         case NUJArray_TYPE:
@@ -259,6 +286,11 @@ static void nuj__print_primitive_element(const NUJElement* element)
 {
     switch (element->type)
     {
+        case NUJString_TYPE:
+        {
+            printf("\"%s\"", NUJ_CSTRING(element)->value);
+        }
+        break;
         case NUJInteger_TYPE:
         {
             printf("%lld", NUJ_CINTEGER(element)->value);
@@ -270,9 +302,14 @@ static void nuj__print_primitive_element(const NUJElement* element)
             printf("%.16lf", NUJ_CDOUBLE(element)->value);
         }
         break;
-        case NUJString_TYPE:
+        case NUJBoolean_TYPE:
         {
-            printf("\"%s\"", NUJ_CSTRING(element)->value);
+            printf("%s", NUJ_CBOOLEAN(element)->value ? "true" : "false");
+        }
+        break;
+        case NUJNull_TYPE:
+        {
+            printf("null");
         }
         break;
     }
@@ -382,18 +419,38 @@ static inline void nuj__parse_skip_all_whitespace_chars(NUJParser* parser)
 
 static inline int nuj__parse_is_numeric(char character)
 {
-    int result = ((character >= '0' && character <= '9') ||
-                  (character == '.'));
+    int result = 0;
+
+    if (character >= '0' && character <= '9')
+    {
+        result = NUJ_NUMBER_TYPE;
+    }
+    else if (character == '.')
+    {
+        result = NUJ_DOUBLE_TYPE;
+    }
 
     return result;
 }
 
-static inline void nuj__parse_skip_all_numerics(NUJParser* parser)
+static inline int nuj__parse_skip_all_numerics(NUJParser* parser)
 {
-    while (nuj__parse_is_numeric(*parser->current))
+    int result = 0;
+    int is_numeric = nuj__parse_is_numeric(*parser->current);
+
+    while (is_numeric)
     {
         ++parser->current;
+
+        if (result < is_numeric)
+        {
+            result = is_numeric;
+        }
+
+        is_numeric = nuj__parse_is_numeric(*parser->current);
     }
+
+    return result;
 }
 
 static NUJToken nuj__parse_get_token(NUJParser* parser)
@@ -427,8 +484,21 @@ static NUJToken nuj__parse_get_token(NUJParser* parser)
             token.type = NUJ_STRING_TYPE;
             token.start = parser->current;
 
-            while (parser->current && *parser->current != '\0' && *parser->current != '"')
+            while (parser->current && *parser->current != '\0')
             {
+                if (*parser->current == '\\' && *(parser->current + 1) == '\\')
+                {
+                    parser->current += 1;
+                }
+                else if (*parser->current == '\\' && *(parser->current + 1) == '"')
+                {
+                    parser->current += 1;
+                }
+                else if (*parser->current == '"')
+                {
+                    break;
+                }
+
                 ++parser->current;
             }
 
@@ -445,6 +515,58 @@ static NUJToken nuj__parse_get_token(NUJParser* parser)
         }
         break;
 
+        case 't':
+        {
+            if (parser->current[0] == 'r' && parser->current[1] == 'u' && parser->current[2] == 'e')
+            {
+                token.type = NUJ_BOOLEAN_TYPE;
+                token.start = (unsigned char*)TRUE;
+                token.length = 1;
+                parser->current += 3;
+            }
+            else
+            {
+                token.type = NUJ_UNKNOWN_TYPE;
+                ++parser->current;
+            }
+        }
+        break;
+
+        case 'f':
+        {
+            if (parser->current[0] == 'a' && parser->current[1] == 'l' &&
+                parser->current[2] == 's' && parser->current[3] == 'e')
+            {
+                token.type = NUJ_BOOLEAN_TYPE;
+                token.start = (unsigned char*)FALSE;
+                token.length = 1;
+                parser->current += 4;
+            }
+            else
+            {
+                token.type = NUJ_UNKNOWN_TYPE;
+                ++parser->current;
+            }
+        }
+        break;
+
+        case 'n':
+        {
+            if (parser->current[0] == 'u' && parser->current[1] == 'l' && parser->current[2] == 'l')
+            {
+                token.type = NUJ_NULL_TYPE;
+                token.start = (unsigned char*)0;
+                token.length = 1;
+                parser->current += 3;
+            }
+            else
+            {
+                token.type = NUJ_UNKNOWN_TYPE;
+                ++parser->current;
+            }
+        }
+        break;
+
         default:
         {
             token.type = NUJ_UNKNOWN_TYPE;
@@ -454,16 +576,18 @@ static NUJToken nuj__parse_get_token(NUJParser* parser)
             if (*parser->current == '-' || *parser->current == '+')
             {
                 token.start = parser->current++;
-                token.type = NUJ_NUMBER_TYPE;
-                nuj__parse_skip_all_numerics(parser);
+                token.type = nuj__parse_skip_all_numerics(parser);
                 token.length = (unsigned int)(parser->current - token.start);
             }
             else if (nuj__parse_is_numeric(*parser->current))
             {
                 token.start = parser->current;
-                token.type = NUJ_NUMBER_TYPE;
-                nuj__parse_skip_all_numerics(parser);
+                token.type = nuj__parse_skip_all_numerics(parser);
                 token.length = (unsigned int)(parser->current - token.start);
+            }
+            else
+            {
+                token.type = NUJ_UNKNOWN_TYPE;
             }
         }
         break;
@@ -487,7 +611,7 @@ static inline int nuj__parse_match_token(NUJToken token, unsigned int match_toke
 // NOTE: This is far from being perfect string to double converter but
 // we don't need that much accuracy.  At least, it is much faster than
 // copying and converting.
-static double nuj__parse_token_to_double(NUJToken token)
+static double nuj__parse_token_to_number(NUJToken token, int is_double)
 {
     const unsigned char* current = token.start;
     double number = 0;
@@ -510,12 +634,15 @@ static double nuj__parse_token_to_double(NUJToken token)
         number = 10.0 * number + digit;
     }
 
-    NUJ_ASSERT(*(current - 1) == '.');
-
-    while ((digit = *current++ - '0') < 10)
+    if (is_double)
     {
-        number = number + coef * digit;
-        coef *= 1.0 / 10.0;
+        NUJ_ASSERT(*(current - 1) == '.');
+
+        while ((digit = *current++ - '0') < 10)
+        {
+            number = number + coef * digit;
+            coef *= 1.0 / 10.0;
+        }
     }
 
     number = number * negative;
@@ -529,14 +656,6 @@ static NUJElement* nuj__parse_token_to_element(NUJHandle handle, NUJToken token)
 
     switch (token.type)
     {
-        case NUJ_NUMBER_TYPE:
-        {
-            double value = 0;
-
-            value = nuj__parse_token_to_double(token);
-            element = nuj_create_element_double(handle, value);
-        }
-        break;
         case NUJ_STRING_TYPE:
         {
             char* svalue = 0;
@@ -547,6 +666,34 @@ static NUJElement* nuj__parse_token_to_element(NUJHandle handle, NUJToken token)
             memcpy((char*)svalue, token.start, token.length);
             svalue[token.length] = '\0';
             NUJ_STRING(element)->value = svalue;
+        }
+        break;
+        case NUJ_NUMBER_TYPE:
+        {
+            long long value = 0;
+
+            value = (long long)nuj__parse_token_to_number(token, 0);
+            element = nuj_create_element_integer(handle, value);
+        }
+        break;
+        case NUJ_DOUBLE_TYPE:
+        {
+            double value = 0;
+
+            value = nuj__parse_token_to_number(token, 1);
+            element = nuj_create_element_double(handle, value);
+        }
+        break;
+        case NUJ_BOOLEAN_TYPE:
+        {
+            long long value = (long long)token.start;
+
+            element = nuj_create_element_boolean(handle, (int)value);
+        }
+        break;
+        case NUJ_NULL_TYPE:
+        {
+            element = nuj_create_element_null(handle);
         }
         break;
     }
@@ -561,12 +708,11 @@ static NUJElement* nuj__parse_element_pair_value(NUJHandle handle, NUJParser* pa
 
     switch (token.type)
     {
-        case NUJ_NUMBER_TYPE:
-        {
-            element = nuj__parse_token_to_element(handle, token);
-        }
-        break;
         case NUJ_STRING_TYPE:
+        case NUJ_NUMBER_TYPE:
+        case NUJ_DOUBLE_TYPE:
+        case NUJ_BOOLEAN_TYPE:
+        case NUJ_NULL_TYPE:
         {
             element = nuj__parse_token_to_element(handle, token);
         }
@@ -664,8 +810,11 @@ static NUJElement* nuj__parse_create_element_object_or_array(NUJElement* element
                 element_offset += nuj__get_total_element_object_size(el);
             }
             break;
-            case NUJDouble_TYPE:
             case NUJString_TYPE:
+            case NUJDouble_TYPE:
+            case NUJInteger_TYPE:
+            case NUJBoolean_TYPE:
+            case NUJNull_TYPE:
             {
                 element_offset += nuj__get_element_size(el);
             }
@@ -875,28 +1024,6 @@ NUJDEF NUJElement* nuj_create_element(NUJHandle handle, unsigned int type, unsig
     return element;
 }
 
-NUJDEF NUJElement* nuj_create_element_object(NUJHandle handle, unsigned int element_count)
-{
-    NUJObject* nuj_object = NUJ_CREATE_ELEMENT(handle, NUJObject);
-
-    nuj_object->child_count = 0;
-    nuj_object->max_child_count = element_count;
-    nuj_object->children = nuj__push_size(handle, element_count * sizeof(NUJElement*));
-
-    return &nuj_object->element;
-}
-
-NUJDEF NUJElement* nuj_create_element_array(NUJHandle handle, unsigned int element_count)
-{
-    NUJArray* nuj_array = NUJ_CREATE_ELEMENT(handle, NUJArray);
-
-    nuj_array->child_count = 0;
-    nuj_array->max_child_count = element_count;
-    nuj_array->children = nuj__push_size(handle, element_count * sizeof(NUJElement*));
-
-    return &nuj_array->element;
-}
-
 NUJDEF NUJElement* nuj_create_element_string(NUJHandle handle, const char* string)
 {
     NUJString* nuj_string = NUJ_CREATE_ELEMENT(handle, NUJString);
@@ -922,6 +1049,46 @@ NUJDEF NUJElement* nuj_create_element_double(NUJHandle handle, double value)
     nuj_double->value = value;
 
     return &nuj_double->element;
+}
+
+NUJDEF NUJElement* nuj_create_element_boolean(NUJHandle handle, int value)
+{
+    NUJBoolean* nuj_boolean = NUJ_CREATE_ELEMENT(handle, NUJBoolean);
+
+    nuj_boolean->value = value;
+
+    return &nuj_boolean->element;
+}
+
+NUJDEF NUJElement* nuj_create_element_null(NUJHandle handle)
+{
+    NUJNull* nuj_null = NUJ_CREATE_ELEMENT(handle, NUJNull);
+
+    nuj_null->value = 0;
+
+    return &nuj_null->element;
+}
+
+NUJDEF NUJElement* nuj_create_element_object(NUJHandle handle, unsigned int element_count)
+{
+    NUJObject* nuj_object = NUJ_CREATE_ELEMENT(handle, NUJObject);
+
+    nuj_object->child_count = 0;
+    nuj_object->max_child_count = element_count;
+    nuj_object->children = nuj__push_size(handle, element_count * sizeof(NUJElement*));
+
+    return &nuj_object->element;
+}
+
+NUJDEF NUJElement* nuj_create_element_array(NUJHandle handle, unsigned int element_count)
+{
+    NUJArray* nuj_array = NUJ_CREATE_ELEMENT(handle, NUJArray);
+
+    nuj_array->child_count = 0;
+    nuj_array->max_child_count = element_count;
+    nuj_array->children = nuj__push_size(handle, element_count * sizeof(NUJElement*));
+
+    return &nuj_array->element;
 }
 
 NUJDEF NUJElement* nuj_add_element_element(NUJElement* element, const char* name, NUJElement* child)
