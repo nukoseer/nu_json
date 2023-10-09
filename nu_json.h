@@ -585,10 +585,6 @@ static NUJToken nuj__parse_get_token(NUJParser* parser)
                 token.type = nuj__parse_skip_all_numerics(parser);
                 token.length = (unsigned int)(parser->current - token.start);
             }
-            else
-            {
-                token.type = NUJ_UNKNOWN_TYPE;
-            }
         }
         break;
     }
