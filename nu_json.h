@@ -15,6 +15,7 @@ typedef struct NUJHandle* NUJHandle;
 typedef struct NUJElement NUJElement;
 
 NUJDEF NUJHandle          nuj_init(void* memory, unsigned long long size);
+NUJDEF void               nuj_reset_used_size(NUJHandle handle);
 NUJDEF unsigned long long nuj_get_used_size(const NUJHandle handle);
 NUJDEF NUJElement*        nuj_create_element(NUJHandle handle, unsigned int type, unsigned int size);
 NUJDEF NUJElement*        nuj_create_element_string(NUJHandle handle, const char* string);
@@ -1005,6 +1006,11 @@ NUJDEF NUJHandle nuj_init(void* memory, unsigned long long size)
     return nuj_handle;
 }
 
+NUJDEF void nuj_reset_used_size(NUJHandle handle)
+{
+    handle->buffer_used = 0;
+}
+
 NUJDEF unsigned long long nuj_get_used_size(const NUJHandle handle)
 {
     return handle->buffer_used;
@@ -1207,6 +1213,11 @@ NUJDEF NUJElement* nuj_parse(NUJHandle handle, const unsigned char* buffer, unsi
     NUJElement* element = 0;
     int parsing = 1;
     NUJToken token = nuj__parse_get_token(&parser);
+
+    if (handle && handle->buffer_used && handle->buffer_size)
+    {
+        nuj_reset_used_size(handle);
+    }
 
     // TODO: Probably we should use this.
     (void)buffer_size;
