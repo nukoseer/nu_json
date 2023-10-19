@@ -827,6 +827,14 @@ static NUJElement* nuj__parse_create_element_object_or_array(NUJElement* element
     return element;
 }
 
+// TODO: Size of NUJObject and NUJArray types depend on how many
+// children they have.  So, we use this function to determine child
+// count they have before creating NUJObject/NUJArray, but this way of
+// counting children is very unefficient because we basically run
+// tokenizer 2 times for each NUJObject/NUJArray.  Also, we work on
+// one big memory chunk and utilize linearity of memory. Allocating
+// elements linearly and having dynamic elements (NUJObject/NUJArray)
+// makes it difficult to change this method of counting.
 static unsigned int nuj__parse_calculate_element_child_count(NUJParser* parser, unsigned int type)
 {
     unsigned int level = 0;
